@@ -1,7 +1,11 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
-// ✅ Correct API key usage
+// ✅ API KEY
 const API_KEY = import.meta.env.VITE_API_KEY;
+
+if (!API_KEY) {
+  throw new Error("API key missing! Check VITE_API_KEY in .env");
+}
 
 const ai = new GoogleGenAI({
   apiKey: API_KEY,
@@ -17,7 +21,6 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
     } catch (error: any) {
       const isQuotaError =
         error?.message?.includes("RESOURCE_EXHAUSTED") ||
-        error?.status === "RESOURCE_EXHAUSTED" ||
         error?.code === 429;
 
       if (isQuotaError && i < maxRetries - 1) {
@@ -26,6 +29,8 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
         delay *= 2;
         continue;
       }
+
+      console.error("API ERROR:", error);
       throw error;
     }
   }
@@ -33,73 +38,33 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   throw new Error("Max retries exceeded");
 }
 
-// 📊 Types
+// 📊 TYPE
 export interface AnalysisResult {
   isReal: boolean;
   confidence: number;
   source: string;
   reasoning: string;
   metadata: {
-    resolution?: string;
-    format?: string;
     artifacts?: string[];
   };
-  heatmaps?: Record<string, string>;
 }
 
-export type HeatmapMode = "artifacts" | "noise" | "lighting";
-
-// 🔥 Heatmap
-export async function generateHeatmap(
-  base64Image: string,
-  mode: HeatmapMode = "artifacts"
-): Promise<string> {
-  const model = "gemini-1.5-flash"; // ✅ safer model
-
-  const prompts = {
-    artifacts: "Highlight deepfake artifacts as heatmap.",
-    noise: "Show noise inconsistency heatmap.",
-    lighting: "Show lighting inconsistency heatmap",
-  };
-
-  const response: GenerateContentResponse = await withRetry(() =>
-    ai.models.generateContent({
-      model,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: prompts[mode] },
-            {
-              inlineData: {
-                data: base64Image.split(",")[1],
-                mimeType: "image/jpeg",
-              },
-            },
-          ],
-        },
-      ],
-    })
-  );
-
-  return response.text || "";
-}
-
-// 🔍 Analysis
+// 🔍 MAIN FUNCTION
 export async function analyzeImage(
   base64Image: string
 ): Promise<AnalysisResult> {
-  const model = "gemini-1.5-pro"; // ✅ stable model
+  const model = "gemini-1.5-flash";
 
   const prompt = `
-Analyze this image and return JSON:
+Analyze this image and return ONLY valid JSON:
+
 {
-  "isReal": boolean,
-  "confidence": number,
-  "source": "string",
-  "reasoning": "string",
+  "isReal": true or false,
+  "confidence": number (0-1),
+  "source": "AI or Real",
+  "reasoning": "short explanation",
   "metadata": {
-    "artifacts": ["string"]
+    "artifacts": ["list of issues"]
   }
 }
 `;
@@ -107,27 +72,59 @@ Analyze this image and return JSON:
   const response: GenerateContentResponse = await withRetry(() =>
     ai.models.generateContent({
       model,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                data: base64Image.split(",")[1],
-                mimeType: "image/jpeg",
-              },
+      contents: {
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              data: base64Image.split(",")[1],
+              mimeType: "image/jpeg",
             },
-          ],
-        },
-      ],
+          },
+        ],
+      },
     })
   );
 
+  const rawText = response.text || "";
+  console.log("Gemini RAW:", rawText);
+
+  // 🔥 Clean response
+  const cleanText = rawText
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+
   try {
-    return JSON.parse(response.text || "{}");
+    return JSON.parse(cleanText);
   } catch (e) {
-    console.error("Parse error:", e);
+    console.error("JSON Parse Failed:", cleanText);
     throw new Error("Analysis failed");
   }
+}
+
+// 🔥 OPTIONAL HEATMAP (SAFE VERSION)
+export async function generateHeatmap(
+  base64Image: string
+): Promise<string> {
+  const model = "gemini-1.5-flash";
+
+  const response: GenerateContentResponse = await withRetry(() =>
+    ai.models.generateContent({
+      model,
+      contents: {
+        parts: [
+          { text: "Highlight manipulated regions in this image." },
+          {
+            inlineData: {
+              data: base64Image.split(",")[1],
+              mimeType: "image/jpeg",
+            },
+          },
+        ],
+      },
+    })
+  );
+
+  return response.text || "No heatmap available";
 }
