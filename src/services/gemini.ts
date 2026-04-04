@@ -41,7 +41,7 @@ export interface AnalysisResult {
 }
 
 export async function analyzeImage(base64Image: string): Promise<AnalysisResult> {
-  const model = "gemini-1.5-flash";
+  const model = "gemini-2.0-flash";
 
   const prompt = `
 Analyze this image and return ONLY valid JSON with no extra text:
@@ -89,7 +89,7 @@ export async function generateHeatmap(
   base64Image: string,
   mode: HeatmapMode
 ): Promise<string> {
-  const model = "gemini-1.5-flash";
+  const model = "gemini-2.0-flash";
 
   const modePrompts: Record<HeatmapMode, string> = {
     artifacts: "Describe the visual artifacts and manipulated regions in this image.",
