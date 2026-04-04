@@ -1,0 +1,5 @@
+{
+  "name": "Deepfake Guardian AI",
+  "description": "Advanced security tool for detecting AI-generated images and deepfakes using neural analysis.",
+  "requestFramePermissions": ["camera"]
+}
