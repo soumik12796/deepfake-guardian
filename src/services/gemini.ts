@@ -1,44 +1,34 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
-// ✅ API KEY
+export type HeatmapMode = 'artifacts' | 'noise' | 'lighting';
+
 const API_KEY = import.meta.env.VITE_API_KEY;
 
 if (!API_KEY) {
   throw new Error("API key missing! Check VITE_API_KEY in .env");
 }
 
-const ai = new GoogleGenAI({
-  apiKey: API_KEY,
-});
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-// 🔁 Retry logic
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   let delay = 1000;
-
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error: any) {
       const isQuotaError =
-        error?.message?.includes("RESOURCE_EXHAUSTED") ||
-        error?.code === 429;
-
+        error?.message?.includes("RESOURCE_EXHAUSTED") || error?.code === 429;
       if (isQuotaError && i < maxRetries - 1) {
-        console.warn(`Retrying in ${delay}ms...`);
         await new Promise((res) => setTimeout(res, delay));
         delay *= 2;
         continue;
       }
-
-      console.error("API ERROR:", error);
       throw error;
     }
   }
-
   throw new Error("Max retries exceeded");
 }
 
-// 📊 TYPE
 export interface AnalysisResult {
   isReal: boolean;
   confidence: number;
@@ -47,24 +37,22 @@ export interface AnalysisResult {
   metadata: {
     artifacts?: string[];
   };
+  heatmaps?: Partial<Record<HeatmapMode, string>>;
 }
 
-// 🔍 MAIN FUNCTION
-export async function analyzeImage(
-  base64Image: string
-): Promise<AnalysisResult> {
+export async function analyzeImage(base64Image: string): Promise<AnalysisResult> {
   const model = "gemini-1.5-flash";
 
   const prompt = `
-Analyze this image and return ONLY valid JSON:
+Analyze this image and return ONLY valid JSON with no extra text:
 
 {
   "isReal": true or false,
-  "confidence": number (0-1),
-  "source": "AI or Real",
-  "reasoning": "short explanation",
+  "confidence": number between 0 and 1,
+  "source": "AI Generated" or "Real Photo",
+  "reasoning": "brief explanation under 50 words",
   "metadata": {
-    "artifacts": ["list of issues"]
+    "artifacts": ["list of detected issues, or empty array if real"]
   }
 }
 `;
@@ -87,13 +75,7 @@ Analyze this image and return ONLY valid JSON:
   );
 
   const rawText = response.text || "";
-  console.log("Gemini RAW:", rawText);
-
-  // 🔥 Clean response
-  const cleanText = rawText
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
+  const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
 
   try {
     return JSON.parse(cleanText);
@@ -103,18 +85,24 @@ Analyze this image and return ONLY valid JSON:
   }
 }
 
-// 🔥 OPTIONAL HEATMAP (SAFE VERSION)
 export async function generateHeatmap(
-  base64Image: string
+  base64Image: string,
+  mode: HeatmapMode
 ): Promise<string> {
   const model = "gemini-1.5-flash";
+
+  const modePrompts: Record<HeatmapMode, string> = {
+    artifacts: "Describe the visual artifacts and manipulated regions in this image.",
+    noise: "Describe the noise patterns and inconsistencies in this image.",
+    lighting: "Describe the lighting inconsistencies and shadows in this image.",
+  };
 
   const response: GenerateContentResponse = await withRetry(() =>
     ai.models.generateContent({
       model,
       contents: {
         parts: [
-          { text: "Highlight manipulated regions in this image." },
+          { text: modePrompts[mode] },
           {
             inlineData: {
               data: base64Image.split(",")[1],
@@ -126,5 +114,5 @@ export async function generateHeatmap(
     })
   );
 
-  return response.text || "No heatmap available";
+  return response.text || "No analysis available";
 }
