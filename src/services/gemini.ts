@@ -4,30 +4,7 @@ export type HeatmapMode = 'artifacts' | 'noise' | 'lighting';
 
 const API_KEY = import.meta.env.VITE_API_KEY;
 
-if (!API_KEY) {
-  throw new Error("API key missing! Check VITE_API_KEY in .env");
-}
-
 const ai = new GoogleGenAI({ apiKey: API_KEY });
-
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
-  let delay = 1000;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      const isQuotaError =
-        error?.message?.includes("RESOURCE_EXHAUSTED") || error?.code === 429;
-      if (isQuotaError && i < maxRetries - 1) {
-        await new Promise((res) => setTimeout(res, delay));
-        delay *= 2;
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error("Max retries exceeded");
-}
 
 export interface AnalysisResult {
   isReal: boolean;
@@ -43,36 +20,31 @@ export interface AnalysisResult {
 export async function analyzeImage(base64Image: string): Promise<AnalysisResult> {
   const model = "gemini-2.0-flash";
 
-  const prompt = `
-Analyze this image and return ONLY valid JSON with no extra text:
-
+  const prompt = `Analyze this image and return ONLY valid JSON, no extra text:
 {
   "isReal": true or false,
   "confidence": number between 0 and 1,
   "source": "AI Generated" or "Real Photo",
-  "reasoning": "brief explanation under 50 words",
+  "reasoning": "brief explanation",
   "metadata": {
-    "artifacts": ["list of detected issues, or empty array if real"]
+    "artifacts": []
   }
-}
-`;
+}`;
 
-  const response: GenerateContentResponse = await withRetry(() =>
-    ai.models.generateContent({
-      model,
-      contents: {
-        parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              data: base64Image.split(",")[1],
-              mimeType: "image/jpeg",
-            },
+  const response: GenerateContentResponse = await ai.models.generateContent({
+    model,
+    contents: {
+      parts: [
+        { text: prompt },
+        {
+          inlineData: {
+            data: base64Image.split(",")[1],
+            mimeType: "image/jpeg",
           },
-        ],
-      },
-    })
-  );
+        },
+      ],
+    },
+  });
 
   const rawText = response.text || "";
   const cleanText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -80,7 +52,6 @@ Analyze this image and return ONLY valid JSON with no extra text:
   try {
     return JSON.parse(cleanText);
   } catch (e) {
-    console.error("JSON Parse Failed:", cleanText);
     throw new Error("Analysis failed");
   }
 }
@@ -92,27 +63,25 @@ export async function generateHeatmap(
   const model = "gemini-2.0-flash";
 
   const modePrompts: Record<HeatmapMode, string> = {
-    artifacts: "Describe the visual artifacts and manipulated regions in this image.",
-    noise: "Describe the noise patterns and inconsistencies in this image.",
-    lighting: "Describe the lighting inconsistencies and shadows in this image.",
+    artifacts: "Describe visual artifacts in this image.",
+    noise: "Describe noise patterns in this image.",
+    lighting: "Describe lighting inconsistencies in this image.",
   };
 
-  const response: GenerateContentResponse = await withRetry(() =>
-    ai.models.generateContent({
-      model,
-      contents: {
-        parts: [
-          { text: modePrompts[mode] },
-          {
-            inlineData: {
-              data: base64Image.split(",")[1],
-              mimeType: "image/jpeg",
-            },
+  const response: GenerateContentResponse = await ai.models.generateContent({
+    model,
+    contents: {
+      parts: [
+        { text: modePrompts[mode] },
+        {
+          inlineData: {
+            data: base64Image.split(",")[1],
+            mimeType: "image/jpeg",
           },
-        ],
-      },
-    })
-  );
+        },
+      ],
+    },
+  });
 
   return response.text || "No analysis available";
 }
