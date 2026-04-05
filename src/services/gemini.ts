@@ -61,7 +61,6 @@ export async function generateHeatmap(
   mode: HeatmapMode
 ): Promise<string> {
   const model = "gemini-1.5-flash-latest";
-";
 
   const modePrompts: Record<HeatmapMode, string> = {
     artifacts: "Describe visual artifacts in this image.",
